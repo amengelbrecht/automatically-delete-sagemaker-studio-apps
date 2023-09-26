@@ -91,12 +91,29 @@ Resources:
               
               return {
                   'statusCode': 200,
-                  'body': 'Complete'
+                  'body': 'Successfully shut down all SageMaker Studio apps'
               }
       Runtime: python3.11
-      Timeout: 120 # Update to suit requirements
+      Timeout: 60
+      
+  SageMakerShutdownSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "Scheduled event to shutdown SageMaker Studio apps"
+      ScheduleExpression: "cron(0 0 * * ? *)"  # Update AWS cron expression here
+      Targets:
+        - Arn: !GetAtt ShutdownSageMakerLambda.Arn
+          Id: "ShutdownSageMakerStudioAppsTarget"
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ShutdownSageMakerLambda.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt SageMakerShutdownSchedule.Arn
 
 Outputs:
   LambdaFunction:
-    Description: The Lambda function to shutdown SageMaker Studio Apps
+    Description: Lambda function to shutdown SageMaker Studio Apps
     Value: !Ref ShutdownSageMakerLambda
