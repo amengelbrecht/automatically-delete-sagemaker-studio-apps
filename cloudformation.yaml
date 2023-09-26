@@ -1,0 +1,102 @@
+Resources:
+  SageMakerShutdownRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: SageMakerShutdownRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: SageMakerShutdownPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "sagemaker:ListDomains"
+                  - "sagemaker:ListApps"
+                  - "sagemaker:DeleteApp"
+                Resource: "*"
+
+  ShutdownSageMakerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ShutdownSageMakerStudioApps
+      Handler: index.lambda_handler
+      Role: !GetAtt SageMakerShutdownRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import logging
+
+          # Initialize logger and set log level
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          # Initialize SageMaker client
+          sagemaker_client = boto3.client('sagemaker')
+
+          def lambda_handler(event, context):
+              # Log the received event
+              logger.info(f'Received event: {event}')
+              
+              # List all SageMaker Studio domains
+              try:
+                  domains = sagemaker_client.list_domains()
+                  logger.info(f'Found domains: {domains}')
+              except Exception as e:
+                  logger.error(f'Failed to list domains: {e}')
+                  return {
+                      'statusCode': 500,
+                      'body': f'Failed to list domains: {e}'
+                  }
+              
+              # Iterate through each domain
+              for domain in domains['Domains']:
+                  logger.info(f'Working on {domain} domain')
+                  domain_id = domain['DomainId']
+                  
+                  # List apps in the current domain
+                  try:
+                      apps = sagemaker_client.list_apps(DomainIdEquals=domain_id)
+                      logger.info(f'Found apps: {apps}')
+                  except Exception as e:
+                      logger.error(f'Failed to list apps in domain {domain_id}: {e}')
+                      continue
+
+                  # Iterate through each app and delete it
+                  for app in apps['Apps']:
+                      logger.info(f'Working on {app}')
+                      app_type = app['AppType']
+                      app_name = app['AppName']
+                      user_profile_name = app['UserProfileName']
+                      
+                      try:
+                          sagemaker_client.delete_app(
+                              DomainId=domain_id,
+                              AppType=app_type,
+                              AppName=app_name,
+                              UserProfileName=user_profile_name
+                          )
+                          logger.info(f'Successfully deleted app {app_name} in domain {domain_id}')
+                      except Exception as e:
+                          logger.error(f'Failed to delete app {app_name} in domain {domain_id}: {e}')
+                          continue
+              
+              return {
+                  'statusCode': 200,
+                  'body': 'Complete'
+              }
+      Runtime: python3.11
+      Timeout: 120 # Update to suit requirements
+
+Outputs:
+  LambdaFunction:
+    Description: The Lambda function to shutdown SageMaker Studio Apps
+    Value: !Ref ShutdownSageMakerLambda
